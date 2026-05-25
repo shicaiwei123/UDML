@@ -1,0 +1,9 @@
+**/__pycache__/
+**/.ipynb_checkpoints/
+**/*.pyc
+
+audio-visual-classification/results/
+
+text-image-classification/checkpoint/
+text-image-classification/datasets/MVSA_Single/
+text-image-classification/bert-base-uncased/
