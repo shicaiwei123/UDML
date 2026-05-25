@@ -76,7 +76,7 @@ CUDA_VISIBLE_DEVICES=0 python -u train_udml_noise_base.py \
 Or:
 
 ```bash
-GPU=0 NAME=noise_gamma4_15_3 FORCE_FRESH=1 bash run_udml_noise_base.sh
+GPU=0 NAME=your_run_name FORCE_FRESH=1 bash run_udml_noise_base.sh
 ```
 
 ### Training Output
@@ -89,6 +89,8 @@ Important files:
 - `model_best_depend.pt`
 - `logfile.log`
 
+This repository does not ship pretrained checkpoints. Train your own model first, or place an external checkpoint under `./checkpoint/<name>/` before evaluation.
+
 ### Important Note
 
 If `./checkpoint/<name>/model_best.pt` already exists, `train_udml_noise_base.py` will load it and enter evaluation instead of starting a fresh run.
@@ -98,8 +100,8 @@ If `./checkpoint/<name>/model_best.pt` already exists, `train_udml_noise_base.py
 ```bash
 export HF_ENDPOINT=https://hf-mirror.com
 CUDA_VISIBLE_DEVICES=0 python eval_udml_noise.py \
-  --checkpoint ./checkpoint/noise_gamma4_15_3/model_best.pt \
-  --depend ./checkpoint/noise_gamma4_15_3/model_best_depend.pt \
+  --checkpoint ./checkpoint/<name>/model_best.pt \
+  --depend ./checkpoint/<name>/model_best_depend.pt \
   --strengths 0,5,10 \
   --batch_sz 32
 ```
@@ -108,8 +110,8 @@ Or:
 
 ```bash
 GPU=0 \
-CKPT=./checkpoint/noise_gamma4_15_3/model_best.pt \
-DEPEND=./checkpoint/noise_gamma4_15_3/model_best_depend.pt \
+CKPT=./checkpoint/<name>/model_best.pt \
+DEPEND=./checkpoint/<name>/model_best_depend.pt \
 STRENGTHS=0,5,10 \
 bash eval_udml_noise.sh
 ```
