@@ -51,7 +51,45 @@ def get_arguments():
     parser.add_argument('--cylcle_epoch', default=50, type=int)
     parser.add_argument('--audio_depend', default=32.0, type=float)
     parser.add_argument('--visual_depend', default=10.0, type=float)
-    return parser.parse_args()
+    parser.add_argument('--noise_type', default='Gaussian', type=str,
+                        choices=['Gaussian', 'Salt', 'None'])
+    parser.add_argument('--train_audio_variance_min', default=0, type=int)
+    parser.add_argument('--train_audio_variance_max', default=11, type=int)
+    parser.add_argument('--train_visual_variance_min', default=0, type=int)
+    parser.add_argument('--train_visual_variance_max', default=11, type=int)
+    parser.add_argument('--train_audio_noise_prob', default=0.5, type=float)
+    parser.add_argument('--train_visual_noise_prob', default=0.5, type=float)
+    parser.add_argument('--test_audio_variance', default=0.0, type=float)
+    parser.add_argument('--test_visual_variance', default=0.0, type=float)
+    parser.add_argument('--test_audio_noise_prob', default=0.5, type=float)
+    parser.add_argument('--test_visual_noise_prob', default=0.5, type=float)
+    args = parser.parse_args()
+
+    if args.train_audio_variance_min > args.train_audio_variance_max:
+        parser.error('--train_audio_variance_min must not exceed its max')
+    if args.train_visual_variance_min > args.train_visual_variance_max:
+        parser.error('--train_visual_variance_min must not exceed its max')
+    variance_values = [
+        args.train_audio_variance_min,
+        args.train_audio_variance_max,
+        args.train_visual_variance_min,
+        args.train_visual_variance_max,
+        args.test_audio_variance,
+        args.test_visual_variance,
+    ]
+    if any(value < 0 for value in variance_values):
+        parser.error('noise variances must be non-negative')
+    probability_values = [
+        args.train_audio_noise_prob,
+        args.train_visual_noise_prob,
+        args.test_audio_noise_prob,
+        args.test_visual_noise_prob,
+    ]
+    if any(not 0.0 <= value <= 1.0 for value in probability_values):
+        parser.error('noise probabilities must be in [0, 1]')
+    if args.noise_type == 'Salt' and any(value > 100 for value in variance_values):
+        parser.error('Salt variances must be in [0, 100]')
+    return args
 
 
 def get_feature_diversity(feature):
@@ -66,15 +104,14 @@ def get_feature_diversity(feature):
     return torch.mean(norm)
 
 
-def regurize(mul, std, target_var=2):
+def regurize(mul, std):
     variance_dul = std ** 2
     variance_dul = variance_dul.view(variance_dul.shape[0], -1)
     mul = mul.view(mul.shape[0], -1)
-    target_var = torch.unsqueeze(target_var, dim=1).cuda()
     loss_kl = (
-        (variance_dul / target_var)
-        + (mul ** 2 / target_var)
-        - torch.log((variance_dul + 1e-8) / target_var)
+        variance_dul
+        + mul ** 2
+        - torch.log(variance_dul + 1e-8)
         - 1
     ) * 0.5
     loss_kl = torch.sum(loss_kl, dim=1)
@@ -130,17 +167,13 @@ def train_epoch(args, epoch, model, device, dataloader, optimizer, scheduler):
         v_diveristy = get_feature_diversity(v_feature)
 
         if not isinstance(a_mul, int):
-            regurize_a = regurize(a_mul, a_std, target_var=a_variance).cuda()
+            regurize_a = regurize(a_mul, a_std).cuda()
         else:
             regurize_a = torch.zeros(1).float().cuda()
             a_std = torch.zeros(1).float().cuda()
 
         if not isinstance(v_mul, int):
-            if args.num_frame > 1:
-                v_variance_kl = torch.repeat_interleave(v_variance, args.num_frame)
-            else:
-                v_variance_kl = v_variance
-            regurize_v = regurize(v_mul, v_std, target_var=v_variance_kl).cuda()
+            regurize_v = regurize(v_mul, v_std).cuda()
         else:
             regurize_v = torch.zeros(1).float().cuda()
             v_std = torch.zeros(1).float().cuda()
@@ -153,7 +186,7 @@ def train_epoch(args, epoch, model, device, dataloader, optimizer, scheduler):
         if variance_fc_loss == torch.inf:
             variance_fc_loss = torch.zeros(1).float().cuda()
 
-        loss = loss_cls + regurize_loss * args.beta + variance_fc_loss * 0.1
+        loss = loss_cls + regurize_loss * args.beta + variance_fc_loss
 
         if step % 100 == 0:
             print("regurize_Loss:", regurize_loss.item(), "unimodal_loss:", (loss_a + loss_v).item(), "cls_loss:",
@@ -185,19 +218,6 @@ def train_epoch(args, epoch, model, device, dataloader, optimizer, scheduler):
         with open('audio_visual_grad_vanilla.csv', 'a', newline='') as f:
             writer = csv.writer(f)
             writer.writerow([audio_grad_sum, visual_grad_sum])
-
-        if args.modulation != 'Normal':
-            audio_scale = audio_grad_sum
-            visual_scale = visual_grad_sum
-
-            for p in model.module.audio_net.parameters():
-                p.grad = p.grad * visual_scale / audio_scale + torch.zeros_like(p.grad).normal_(
-                    0, p.grad.std().item() + 1e-8
-                )
-            for p in model.module.visual_net.parameters():
-                p.grad = p.grad * audio_scale / visual_scale + torch.zeros_like(p.grad).normal_(
-                    0, p.grad.std().item() + 1e-8
-                )
 
         optimizer.step()
 
@@ -242,7 +262,7 @@ def valid(args, model, device, dataloader):
         acc_a = [0.0 for _ in range(n_classes)]
         acc_v = [0.0 for _ in range(n_classes)]
 
-        for spec, image, label, a_variance, v_variance in dataloader:
+        for spec, image, label, v_variance, a_variance in dataloader:
             spec = spec.to(device)
             image = image.to(device)
             label = label.to(device)
@@ -276,11 +296,11 @@ def build_datasets(args):
     if args.dataset == 'KineticSound':
         train_dataset_clean = KSDataset_Noise(args, mode='train', add_noise=False)
         train_dataset_noise = KSDataset_Noise(args, mode='train', add_noise=True)
-        test_dataset = KSDataset_Noise(args, mode='test')
+        test_dataset = KSDataset_Noise(args, mode='test', add_noise=args.noise_type != 'None')
     elif args.dataset == 'CREMAD':
         train_dataset_clean = CramedDataset(args, mode='train', add_noise=False)
         train_dataset_noise = CramedDataset(args, mode='train', add_noise=True)
-        test_dataset = CramedDataset(args, mode='test', add_noise=True)
+        test_dataset = CramedDataset(args, mode='test', add_noise=args.noise_type != 'None')
     else:
         raise NotImplementedError(
             'Incorrect dataset name {}! Only support CREMAD and KineticSound in this release build!'.format(

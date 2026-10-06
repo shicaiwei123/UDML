@@ -381,7 +381,6 @@ class ResNet(nn.Module):
                 # std_dul = torch.clamp(std_dul, min=0, max=2)
 
                 # if self.args.epoch_now<2:
-                std_dul = torch.clamp(std_dul, min=0, max=self.args.max)
 
                 if self.training:
 
@@ -719,9 +718,9 @@ class Bottleneck(nn.Module):
 
 def _resnet(arch, args, block, layers, modality, progress, **kwargs):
     model = ResNet(args, block, layers, modality, **kwargs)
-    if args.pretrain and args.modality == 'visual':
-        state_dict = torch.load("resnet18-5c106cde.pth")
-        model.load_state_dict(state_dict)
+    # if args.pretrain and args.modality == 'visual':
+    #     state_dict = torch.load("resnet18-5c106cde.pth")
+    #     model.load_state_dict(state_dict)
     return model
 
 
@@ -732,9 +731,9 @@ def resnet18(modality, args, progress=True, **kwargs):
 
 def _resnet_weight(arch, args, block, layers, modality, progress, **kwargs):
     model = ResNet_weight(args, block, layers, modality, **kwargs)
-    if args.pretrain and args.modality == 'visual':
-        state_dict = torch.load("resnet18-5c106cde.pth")
-        model.load_state_dict(state_dict)
+    # if args.pretrain and args.modality == 'visual':
+    #     state_dict = torch.load("resnet18-5c106cde.pth")
+    #     model.load_state_dict(state_dict)
     return model
 
 

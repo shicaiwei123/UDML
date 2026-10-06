@@ -969,28 +969,39 @@ class AVClassifier_AUXI_UDML(nn.Module):
                 a_std_fc=self.audio_variance_estimator(a_std_in.detach())
                 v_std_fc=self.visual_variance_estimator(v_std_in.detach())
 
-                a_std_fc = (a_std_fc * 0.5).exp()
-                v_std_fc = (v_std_fc * 0.5).exp()
+                a_std_fc = F.softplus(a_std_fc)
+                v_std_fc = F.softplus(v_std_fc)
+
+                a_std_fc = a_std_fc+1
+                v_std_fc=v_std_fc+1
+
 
                 if self.training:
                     if self.args.current_epoch<self.args.cylcle_epoch+10:
                         target_weight_a,target_weight_v=1,1
                     else:
-                        target_weight_a,target_weight_v=2*v_std_fc**2/(v_std_fc**2+a_std_fc**2),2*a_std_fc**2/(v_std_fc**2+a_std_fc**2)
+                        uncertainty_sum = v_std_fc ** 2 + a_std_fc ** 2 + 1e-8
+                        target_weight_a = 2 * v_std_fc ** 2 / uncertainty_sum
+                        target_weight_v = 2 * a_std_fc ** 2 / uncertainty_sum
+                        # target_weight_a,target_weight_v=1,1
+
 
                         # teaching force
                         # a_varinace_label=torch.unsqueeze(a_varinace_label.float(),dim=1).cuda()
                         # v_varinace_label=torch.unsqueeze(v_varinace_label.float(),dim=1).cuda()
                         # weight_a,weight_v=2*v_varinace_label**2/(v_varinace_label**2+a_varinace_label**2),2*a_varinace_label**2/(v_varinace_label**2+a_varinace_label**2)
                 else:
-                    target_weight_a,target_weight_v=2*v_std_fc**2/(v_std_fc**2+a_std_fc**2),2*a_std_fc**2/(v_std_fc**2+a_std_fc**2)
+                    uncertainty_sum = v_std_fc ** 2 + a_std_fc ** 2 + 1e-8
+                    target_weight_a = 2 * v_std_fc ** 2 / uncertainty_sum
+                    target_weight_v = 2 * a_std_fc ** 2 / uncertainty_sum
 
 
                 # print(target_weight_a.shape)
                 weight_a=target_weight_a/self.args.audio_depend
                 weight_v=target_weight_v/self.args.visual_depend
 
-                weight_a,weight_v=2*weight_a/(weight_a+weight_v),2*weight_v/(weight_a+weight_v)
+                weight_sum = weight_a + weight_v + 1e-8
+                weight_a,weight_v=2*weight_a/weight_sum,2*weight_v/weight_sum
                 
                 # print(weight_a,weight_v)
 

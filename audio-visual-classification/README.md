@@ -38,63 +38,94 @@ Supported datasets in the current code:
 
 The repository includes lightweight metadata files under `dataset/data/`, but dataset assets should be prepared separately according to your environment.
 
+mkdir train_test_data (same level with the main_auxi_weight_udml.py) and put the dataset in the floder
+
 ## Train
 
-Quick start:
+Each launcher contains two fixed commands and runs them in order: clean UDML,
+then Gaussian noise training after the default cycle epoch 50.
 
 ```bash
 bash cramed_auxi.sh
 bash ks_auxi.sh
 ```
 
-Example: CREMAD
-
-```bash
-python main_auxi_weight_udml.py \
-  --ckpt_path ./results/cramed/udml \
-  --modality full \
-  --dataset CREMAD \
-  --gpu_ids 0 \
-  --modulation Normal \
-  --train \
-  --num_frame 1 \
-  --pe 1 \
-  --beta 1e-5 \
-  --gamma 4.0
-```
-
-Example: KineticSound
-
-```bash
-python main_auxi_weight_udml.py \
-  --ckpt_path ./results/ks/udml \
-  --modality full \
-  --dataset KineticSound \
-  --gpu_ids 0 \
-  --modulation Normal \
-  --train \
-  --num_frame 3 \
-  --pe 1 \
-  --beta 0 \
-  --gamma 2.5
-```
-
 ## Evaluate
 
-Evaluation is implemented in `main_auxi_weight_udml.py`.
+Use the standalone `test.py` entry. It accepts the checkpoint and corruption settings on the command line, evaluates every test sample by default, and reports fused, audio-only, and visual-only accuracy.
 
-To evaluate a checkpoint, update the checkpoint loading path in the evaluation branch of `main()` and run the script without `--train`.
+With no noise flags, `test.py` follows the first noisy condition in UDML Table 3: Gaussian level 5 with independent audio/visual application probability 0.5. The other official robustness settings are Gaussian 10 and Salt 5/10. Pass `--noise_type None` for clean evaluation.
 
-Example:
+Clean CREMAD evaluation:
 
 ```bash
-python main_auxi_weight_udml.py \
+python test.py \
   --dataset CREMAD \
-  --modality full \
+  --pretrained_model <checkpoint.pth> \
+  --noise_type None \
   --fusion_method concat \
   --num_frame 1 \
   --pe 1 \
-  --gamma 4.0 \
-  --beta 1e-5 \
   --gpu_ids 0
 ```
+
+Gaussian noise with one shared level:
+
+```bash
+python test.py \
+  --dataset CREMAD \
+  --pretrained_model <checkpoint.pth> \
+  --noise_type Gaussian \
+  --noise_level 5 \
+  --gpu_ids 0 \
+  --output ./results/test_gaussian_level5.json
+```
+
+`--visual_variance` and `--audio_variance` set modality-specific fixed levels and override `--noise_level`:
+
+```bash
+python test.py \
+  --dataset CREMAD \
+  --pretrained_model <checkpoint.pth> \
+  --noise_type Gaussian \
+  --visual_variance 5 \
+  --audio_variance 2 \
+  --visual_noise_prob 0.5 \
+  --audio_noise_prob 0.5 \
+  --gpu_ids 0
+```
+
+salt-and-pepper noise uses levels in `[0, 100]`:
+
+```bash
+python test.py \
+  --dataset CREMAD \
+  --pretrained_model <checkpoint.pth> \
+  --noise_type Salt \
+  --noise_level 5 \
+  --gpu_ids 0
+```
+
+### Noise test launch scripts
+
+Run one checkpoint with explicit modality strengths:
+
+```bash
+bash test_noise.sh \
+  CREMAD \
+  results/cramed/udml/best_model.pth \
+  Gaussian \
+  5 \
+  5 \
+  0
+```
+
+The positional arguments are `DATASET CHECKPOINT NOISE_TYPE VISUAL_VARIANCE AUDIO_VARIANCE [GPU_ID] [OUTPUT_JSON]`. For example, replace `Gaussian 5 5` with `Salt 10 10`, or use different modality strengths such as `Gaussian 5 2`.
+
+Run every discovered checkpoint under the four official robustness conditions Gaussian 5/10 and Salt 5/10:
+
+```bash
+bash run_noise_matrix.sh results/noise_matrix_seed0_p05
+```
+
+Both scripts default to audio/visual probability 0.5, seed 0, batch size 64, and 8 workers. These can be changed through `AUDIO_NOISE_PROB`, `VISUAL_NOISE_PROB`, `SEED`, `BATCH_SIZE`, and `NUM_WORKERS` environment variables.
