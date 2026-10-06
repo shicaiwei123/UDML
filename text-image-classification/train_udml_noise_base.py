@@ -76,11 +76,11 @@ class BertClf_UDML(nn.Module):
         s = mu + torch.randn_like(std) * std if self.training else mu
         return self.clf(s), s, mu, std
 
-def kl_reg(mu, std, tv):
+def kl_reg(mu, std):
+    # KL(q(z|x) || N(0, I)): keep the latent mean at 0 and variance at 1.
     v = (std ** 2).view(std.size(0), -1)
     mu = mu.view(mu.size(0), -1)
-    tv = tv.view(-1, 1)
-    return torch.mean(torch.sum(0.5 * (v / tv + mu**2 / tv - torch.log(v / tv + 1e-8) - 1), 1))
+    return torch.mean(torch.sum(0.5 * (v + mu**2 - torch.log(v + 1e-8) - 1), 1))
 
 class MultimodalLateFusionUDML(nn.Module):
     def __init__(self, args):
@@ -100,13 +100,13 @@ class MultimodalLateFusionUDML(nn.Module):
         wt, wv = rwt / td, rwv / vd
         ws = wt + wv + 1e-8; wt, wv = 2 * wt / ws, 2 * wv / ws
         if self.training and hasattr(self.args, 'current_epoch') and \
-           self.args.current_epoch < 15:
+           self.args.current_epoch < self.args.cylcle_epoch + 10:
             wt, wv = torch.ones_like(wt), torch.ones_like(wv)
         # 直接对 logits 加权融合（和 baseline 一样的方式）
-        # wt, wv = torch.ones_like(wt)*1.3, torch.ones_like(wv)*0.7
+        # wt, wv = torch.ones_like(wt)*1.2, torch.ones_like(wv)*0.8
 
         fo =tl+ wt * tl + il+ wv * il
-        fo =wt * tl + wv * il
+        # fo =wt * tl + wv * il
 
         return fo, tl, il, tv, iv, wt, wv, tmu, tstd, imu, istd
 
@@ -233,31 +233,41 @@ def main():
 
         # 初始 depend
         if not hasattr(model.args, 'text_depend'):
-            model.args.text_depend = 1.0
-            model.args.visual_depend = 1.0
+            model.args.text_depend = args.audio_depend
+            model.args.visual_depend = args.visual_depend
 
         # 两阶段噪声切换
         # train_loader.dataset.set_noisy(epoch >= args.cylcle_epoch)
-        if epoch<15:
-            train_loader=train_loader_clean
+        if epoch < args.cylcle_epoch:
+            train_loader = train_loader_clean
         else:
-            train_loader=train_loader_noise
+            train_loader = train_loader_noise
 
         model.train()
         epoch_loss = 0
+        text_depend_sum = 0.0
+        visual_depend_sum = 0.0
+        depend_sample_count = 0
         for batch in tqdm(train_loader, desc=f"E{epoch}"):
             text, seg, mask, img, target, idx, tv, iv = [x.to(device) for x in batch]
             fo, tl, il, tvp, ivp, wt, wv, tmu, tstd, imu, istd = model(text, mask, seg, img)
             lf = criterion(fo, target); lt = criterion(tl, target); li = criterion(il, target)
             loss = (lf + args.gamma * (lt + li) +
-                    args.beta * (kl_reg(tmu, tstd, tv) + kl_reg(imu, istd, iv)) +
+                    args.beta * (kl_reg(tmu, tstd) + kl_reg(imu, istd)) +
                     0.1 * (F.mse_loss(tvp, tv.view(-1,1)) + F.mse_loss(ivp, iv.view(-1,1))))
             optimizer.zero_grad(); loss.backward(); optimizer.step()
             epoch_loss += loss.item()
-            # 每个 batch 更新 depend
+
+            # Accumulate per-sample modality dependence over the full epoch.
             with torch.no_grad():
-                model.args.text_depend = torch.mean(torch.abs(tl), 0).sum().item()
-                model.args.visual_depend = torch.mean(torch.abs(il), 0).sum().item()
+                text_depend_sum += tl.detach().abs().sum().item()
+                visual_depend_sum += il.detach().abs().sum().item()
+                depend_sample_count += target.size(0)
+
+        # Equivalent to a batch-size-weighted average of the old per-batch
+        # sum(mean(abs(logits), dim=0)) statistic.
+        model.args.text_depend = text_depend_sum / depend_sample_count
+        model.args.visual_depend = visual_depend_sum / depend_sample_count
 
         print(wt.mean().detach(),wv.mean().detach(),tv.mean().detach(),tvp.mean().detach(),iv.mean().detach(),ivp.mean().detach(),model.args.text_depend,model.args.visual_depend)
         val_loss, val_acc, udml_str = evaluate(model, val_loader, criterion, device, verbose=True)
@@ -267,14 +277,27 @@ def main():
             msg += " | " + udml_str
         logger.info(msg)
 
-        if val_acc > best_acc and epoch>15:
+        # Evaluate the clean test split after every epoch.
+        for test_name, test_loader in test_loaders.items():
+            test_loss, test_acc, test_udml_str = evaluate(
+                model, test_loader, criterion, device, verbose=True
+            )
+            test_msg = (
+                f"E{epoch} | Clean Test [{test_name}] "
+                f"loss={test_loss:.4f} acc={test_acc:.4f}"
+            )
+            if test_udml_str:
+                test_msg += " | " + test_udml_str
+            logger.info(test_msg)
+
+        if val_acc > best_acc and epoch >= args.cylcle_epoch + 10:
             best_acc = val_acc; no_improve = 0
             torch.save(model.state_dict(), f"{args.savedir}/model_best.pt")
             torch.save({'text_depend': model.args.text_depend,
                         'visual_depend': model.args.visual_depend},
                        f"{args.savedir}/model_best_depend.pt")
         else:
-            if epoch>15:
+            if epoch >= args.cylcle_epoch + 10:
                 no_improve += 1
         if no_improve >= args.patience:
             logger.info(f"Early stop at epoch {epoch}, best val_acc={best_acc:.4f}")

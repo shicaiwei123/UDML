@@ -90,7 +90,7 @@ def get_optimizer(model: nn.Module, args: argparse.Namespace) -> optim.Optimizer
 
 
 def get_scheduler(optimizer: optim.Optimizer, args: argparse.Namespace) -> optim.lr_scheduler._LRScheduler:
-    return optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode="max", patience=args.lr_patience, verbose=True, factor=args.lr_factor)
+    return optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode="max", patience=args.lr_patience, factor=args.lr_factor)
 
 
 def model_eval(epoch, dataloader, model, args, criterion, store_preds=False):

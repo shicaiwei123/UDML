@@ -196,11 +196,11 @@ class ConcatFusion_AUXI(nn.Module):
         return xo, yo, out
 
 
-def kl_reguliarize(mu, std, target_var):
-    var = std ** 2; var = var.view(var.shape[0], -1)
+def kl_reguliarize(mu, std):
+    # KL(q(z|x) || N(0, I)): keep the latent mean at 0 and variance at 1.
+    var = (std ** 2).view(std.shape[0], -1)
     mu = mu.view(mu.shape[0], -1)
-    tv = target_var.view(-1, 1)
-    loss = 0.5 * (var / tv + mu ** 2 / tv - torch.log(var / tv + 1e-8) - 1)
+    loss = 0.5 * (var + mu ** 2 - torch.log(var + 1e-8) - 1)
     return torch.mean(torch.sum(loss, dim=1))
 
 
@@ -246,7 +246,7 @@ def train_epoch(model, loader, optimizer, criterion, args, epoch):
         lf = criterion(fo, target); lt = criterion(tl, target); li = criterion(il, target)
         lfx = criterion(fx, target); lfy = criterion(fy, target)
         lcls = lf + args.gamma * (lt + li + lfx + lfy)
-        lkl = kl_reguliarize(tmu, tstd, tv) + kl_reguliarize(imu, istd, iv)
+        lkl = kl_reguliarize(tmu, tstd) + kl_reguliarize(imu, istd)
         lvar = F.mse_loss(tvp, tv.view(-1, 1)) + F.mse_loss(ivp, iv.view(-1, 1))
         loss = lcls + args.beta * lkl + lvar * 0.1
         optimizer.zero_grad(); loss.backward(); optimizer.step()

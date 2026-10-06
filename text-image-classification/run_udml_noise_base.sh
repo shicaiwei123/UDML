@@ -15,7 +15,7 @@
 set -e
 
 # ── 1. 环境 ──────────────────────────────────────────────
-source /root/miniconda3/bin/activate torch2.5
+source /root/miniconda3/bin/activate torch2.5.1
 export HF_ENDPOINT=https://hf-mirror.com
 
 # ── 2. 参数 ───────────────────────────────────────────────

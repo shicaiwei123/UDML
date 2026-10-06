@@ -7,22 +7,21 @@ This branch follows the `text-image-classification` layout used in QMF. Run all 
 ## Tested Environment
 
 - Python `3.12.13`
-- CUDA `12.4`
-- cuDNN `9.1.0`
-- PyTorch `2.5.1+cu124`
-- torchvision `0.20.1+cu124`
-- numpy `2.4.3`
+- CUDA `12.8`
+- cuDNN `9.7.1`
+- PyTorch `2.7.0+cu128`
+- torchvision `0.22.0+cu128`
+- numpy `2.4.4`
 - scikit-learn `1.8.0`
-- Pillow `12.1.1`
+- Pillow `12.2.0`
 - tqdm `4.67.3`
 - pytorch-pretrained-bert `0.6.2`
 
 ## Install
 
 ```bash
-conda create -n mvsa_task python=3.12 -y
-conda activate mvsa_task
-pip install -r requirements.txt
+source /root/miniconda3/bin/activate torch2.5.1
+pip install pytorch-pretrained-bert==0.6.2
 export HF_ENDPOINT=https://hf-mirror.com
 ```
 
