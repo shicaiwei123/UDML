@@ -105,8 +105,7 @@ class MultimodalLateFusionUDML(nn.Module):
         # 直接对 logits 加权融合（和 baseline 一样的方式）
         # wt, wv = torch.ones_like(wt)*1.2, torch.ones_like(wv)*0.8
 
-        fo =tl+ wt * tl + il+ wv * il
-        # fo =wt * tl + wv * il
+        fo =wt * tl + wv * il
 
         return fo, tl, il, tv, iv, wt, wv, tmu, tstd, imu, istd
 
@@ -127,7 +126,7 @@ def get_args(parser):
               ("--lr_patience", 2), ("--max_epochs", 100),
               ("--max_seq_len", 512), ("--model", "latefusion_udml"),
               ("--n_workers", 4), ("--name", "udml_run"),
-              ("--num_image_embeds", 3), ("--patience", 10),
+              ("--num_image_embeds", 3), ("--patience", 5),
               ("--savedir", "./checkpoint"), ("--seed", 2),
               ("--task", "MVSA_Single"), ("--task_type", "classification"),
               ("--warmup", 0.1), ("--weight_classes", 1), ("--df", 1),
@@ -209,13 +208,19 @@ def main():
     # ── 重复运行自动走评估（不训练）──
     best_ckpt = f"{args.savedir}/model_best.pt"
     if os.path.exists(best_ckpt):
-        model.load_state_dict(torch.load(best_ckpt))
+        model.load_state_dict(torch.load(best_ckpt, map_location=device))
         depend_ckpt = f"{args.savedir}/model_best_depend.pt"
         if os.path.exists(depend_ckpt):
-            dep = torch.load(depend_ckpt)
+            dep = torch.load(depend_ckpt, map_location='cpu')
             model.args.text_depend = dep['text_depend']
             model.args.visual_depend = dep['visual_depend']
-            logger.info(f"Loaded depend: text={model.args.text_depend:.2f} visual={model.args.visual_depend:.2f}")
+            source = ""
+            if 'epoch' in dep:
+                source = f" epoch={dep['epoch']} val_acc={dep.get('val_acc', float('nan')):.4f}"
+            logger.info(
+                f"Loaded best depend:{source} "
+                f"text={model.args.text_depend:.2f} visual={model.args.visual_depend:.2f}"
+            )
         logger.info("Loaded existing model_best.pt, evaluation only:")
         _, _, s = evaluate(model, val_loader, criterion, device, verbose=True)
         if s: logger.info("Val | " + s)
@@ -264,10 +269,6 @@ def main():
                 visual_depend_sum += il.detach().abs().sum().item()
                 depend_sample_count += target.size(0)
 
-        # Equivalent to a batch-size-weighted average of the old per-batch
-        # sum(mean(abs(logits), dim=0)) statistic.
-        model.args.text_depend = text_depend_sum / depend_sample_count
-        model.args.visual_depend = visual_depend_sum / depend_sample_count
 
         print(wt.mean().detach(),wv.mean().detach(),tv.mean().detach(),tvp.mean().detach(),iv.mean().detach(),ivp.mean().detach(),model.args.text_depend,model.args.visual_depend)
         val_loss, val_acc, udml_str = evaluate(model, val_loader, criterion, device, verbose=True)
@@ -290,21 +291,41 @@ def main():
                 test_msg += " | " + test_udml_str
             logger.info(test_msg)
 
-        if val_acc > best_acc and epoch >= args.cylcle_epoch + 10:
+        if val_acc > best_acc and epoch >= args.cylcle_epoch + 5:
             best_acc = val_acc; no_improve = 0
             torch.save(model.state_dict(), f"{args.savedir}/model_best.pt")
             torch.save({'text_depend': model.args.text_depend,
-                        'visual_depend': model.args.visual_depend},
+                        'visual_depend': model.args.visual_depend,
+                        'epoch': epoch,
+                        'val_acc': val_acc},
                        f"{args.savedir}/model_best_depend.pt")
         else:
-            if epoch >= args.cylcle_epoch + 10:
+            if epoch >= args.cylcle_epoch + 5:
                 no_improve += 1
         if no_improve >= args.patience:
             logger.info(f"Early stop at epoch {epoch}, best val_acc={best_acc:.4f}")
             break
 
+        # Equivalent to a batch-size-weighted average of the old per-batch
+        # sum(mean(abs(logits), dim=0)) statistic.
+        model.args.text_depend = text_depend_sum / depend_sample_count
+        model.args.visual_depend = visual_depend_sum / depend_sample_count
+
+
     logger.info(f"Done. Best val_acc={best_acc:.4f}")
-    model.load_state_dict(torch.load(f"{args.savedir}/model_best.pt"))
+    model.load_state_dict(torch.load(best_ckpt, map_location=device))
+    depend_ckpt = f"{args.savedir}/model_best_depend.pt"
+    if os.path.exists(depend_ckpt):
+        dep = torch.load(depend_ckpt, map_location='cpu')
+        model.args.text_depend = dep['text_depend']
+        model.args.visual_depend = dep['visual_depend']
+        source = ""
+        if 'epoch' in dep:
+            source = f" epoch={dep['epoch']} val_acc={dep.get('val_acc', float('nan')):.4f}"
+        logger.info(
+            f"Loaded best depend for final test:{source} "
+            f"text={model.args.text_depend:.2f} visual={model.args.visual_depend:.2f}"
+        )
     model.eval()
     for name, loader in test_loaders.items():
         l, a, s = evaluate(model, loader, criterion, device, verbose=True)

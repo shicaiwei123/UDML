@@ -7,3 +7,4 @@ audio-visual-classification/results/
 text-image-classification/checkpoint/
 text-image-classification/datasets/MVSA_Single
 text-image-classification/bert-base-uncased
+text-image-classification/repro_notes.md
