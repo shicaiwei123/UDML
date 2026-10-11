@@ -972,17 +972,19 @@ class AVClassifier_AUXI_UDML(nn.Module):
                 a_std_fc = F.softplus(a_std_fc)
                 v_std_fc = F.softplus(v_std_fc)
 
-                a_std_fc = a_std_fc+1
-                v_std_fc=v_std_fc+1
+                # Keep the zero-valued clean target reachable by the FC loss.
+                # Add 1 only when converting its prediction to fusion weights.
+                a_std_for_weight = a_std_fc + 1
+                v_std_for_weight = v_std_fc + 1
 
 
                 if self.training:
                     if self.args.current_epoch<self.args.cylcle_epoch+10:
                         target_weight_a,target_weight_v=1,1
                     else:
-                        uncertainty_sum = v_std_fc ** 2 + a_std_fc ** 2 + 1e-8
-                        target_weight_a = 2 * v_std_fc ** 2 / uncertainty_sum
-                        target_weight_v = 2 * a_std_fc ** 2 / uncertainty_sum
+                        uncertainty_sum = v_std_for_weight ** 2 + a_std_for_weight ** 2 + 1e-8
+                        target_weight_a = 2 * v_std_for_weight ** 2 / uncertainty_sum
+                        target_weight_v = 2 * a_std_for_weight ** 2 / uncertainty_sum
                         # target_weight_a,target_weight_v=1,1
 
 
@@ -991,9 +993,9 @@ class AVClassifier_AUXI_UDML(nn.Module):
                         # v_varinace_label=torch.unsqueeze(v_varinace_label.float(),dim=1).cuda()
                         # weight_a,weight_v=2*v_varinace_label**2/(v_varinace_label**2+a_varinace_label**2),2*a_varinace_label**2/(v_varinace_label**2+a_varinace_label**2)
                 else:
-                    uncertainty_sum = v_std_fc ** 2 + a_std_fc ** 2 + 1e-8
-                    target_weight_a = 2 * v_std_fc ** 2 / uncertainty_sum
-                    target_weight_v = 2 * a_std_fc ** 2 / uncertainty_sum
+                    uncertainty_sum = v_std_for_weight ** 2 + a_std_for_weight ** 2 + 1e-8
+                    target_weight_a = 2 * v_std_for_weight ** 2 / uncertainty_sum
+                    target_weight_v = 2 * a_std_for_weight ** 2 / uncertainty_sum
 
 
                 # print(target_weight_a.shape)
