@@ -183,6 +183,15 @@ def train_epoch(args, epoch, model, device, dataloader, optimizer, scheduler):
         a_variance = torch.unsqueeze(a_variance.float(), dim=1).cuda()
 
         variance_fc_loss = F.mse_loss(a_std_fc, a_variance) + F.mse_loss(v_std_fc, v_variance)
+
+        if epoch < args.cylcle_epoch:
+            variance_fc_loss = a_std_fc.new_zeros(())
+        else:
+            variance_fc_loss = (
+                F.mse_loss(a_std_fc, a_variance)
+                + F.mse_loss(v_std_fc, v_variance)
+            )
+        
         if variance_fc_loss == torch.inf:
             variance_fc_loss = torch.zeros(1).float().cuda()
 
